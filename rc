@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+
+# Remote Command (rc): A command-line System Administration tool written in bash 4.2+.
+# https://github.com/zpiatt/rc
+#
+# Copyright (C) 2025 Zac Piatt
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+readonly VERSION="Remote Command (rc) version: 0.1.0-beta - October 26, 2026"
+
+usage() {
+    printf "Usage: rc [OPTION]... [SYSTEM/APPLICATION]...\n"
+    printf "Connect to/run remote commands on target systems by application name.\n\n"
+    printf " -f, specify host list as file (rc -f hosts.txt)\n"
+    printf " -h, display help and exit\n"
+    printf " -v, display version number and exit\n\n"
+    printf "Interaction keys:\n"
+    printf " SPACEBAR - toggle host selection\n"
+    printf " ENTER - execute selection\n"
+    printf " (SSH to currently highlighted host OR executes run command/clear selection/QUIT)\n"
+    printf " UP\DOWN arrows - move cursor\n"
+    printf " r - move cursor to 'run command' option\n"
+    printf " c - move cursor to 'clear selection' option\n"
+    printf " q - move cursor to 'QUIT' option\n\n"
+    printf "Full documentation <https://github.com/zpiatt/rc>\n"
+}
+
+run_command() {
+    local history_file remote_command confirm host
+
+    history_file="${HOME}/.bash_history"
+    history -r "$history_file"
+    read -erp $'\nEnter remote command: ' remote_command
+    printf "Run: '%s'\n" "$remote_command"
+    read -erp "on selected hosts? [y/N]: " confirm
+    [[ "${confirm,,}" =~ ^y(es)?$ ]] || return 0
+    history -s "$remote_command"
+    history -w "$history_file"
+
+    for host in "${!selected_hosts[@]}"; do
+        printf "%b%s@%s [%s]:%b\n" "$grey" "$USER" "$host" "$(date)" "$reset"
+        ssh -qto ConnectTimeout=3 "$host" "$remote_command" || \
+            { (( $? == 255 )) && printf "SSH failed: %s\n\n" "$host" >&2; }
+    done
+
+    read -rsp $'\nPress any key to continue' -n1
+}
+
+print_menu() {
+    local index host
+
+    for index in "${!hosts[@]}"; do
+        if (( index == selected )); then
+            printf "\e[7m%s\e[27m\n" "${hosts[$index]}"
+        else
+            printf "%s\n" "${hosts[$index]}"
+        fi
+    done
+
+    if (( ${#selected_hosts[@]} > 0 )); then
+        printf "\n selected hosts:\n"
+        for host in "${!selected_hosts[@]}"; do
+            printf " %s\n" "$host"
+        done
+    fi
+
+    tput cup $(( lines - 1 )) 0
+
+    printf "%bSPACEBAR%b - toggle selection %bENTER%b - SSH/execute option %bUP/DOWN%b - move cursor" \
+        "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
+}
+
+execute_selection() {
+    case "$selected" in
+        "$run_command") (( ${selected_hosts[@]} > 0 )) && run_command ;;
+        "$clear_selection") selected_hosts=() ;;
+        "$quit") exit 0 ;;
+        *)
+            tput clear cnorm
+            ssh -qo ConnectTimeout=3 "${hosts[$selected]}" || \
+                { (( "$?" == 255 )) && printf "SSH failed: %s\n\n" "${hosts[$selected]}" >&2
+                read -rsp $'\nPress any key to continue' -n1; }
+        ;;
+    esac
+}
+
+toggle_selection() {
+    if [[ -n "${selected_hosts[${hosts[$selected]}]}" ]]; then
+        unset "selected_hosts[${hosts[$selected]}]"
+    else
+        selected_hosts["${hosts[$selected]}"]=1
+    fi
+}
+
+move_cursor() {
+    local direction="$1"
+
+    (( selected += direction ))
+    (( selected > quit )) && selected=0
+    (( selected < 0 )) && selected="$quit"
+    (( selected == empty_line )) && selected=$(( selected + direction ))
+}
+
+get_selection() {
+    local key
+
+    IFS= read -rsn1 key
+    case "${key,,}" in
+        r) selected="$run_command" ;;
+        c) selected="$clear_selection" ;;
+        q) selected="$quit" ;;
+        k) move_cursor -1 ;;
+        j) move_cursor 1 ;;
+        $'\e')
+            read -rsn2 key
+            case "$key" in
+                "[A") move_cursor -1 ;;
+                "[B") move_cursor 1 ;;
+            esac
+        ;;
+
+        $'\x20') (( selected <= last_host )) && toggle_selection ;;
+        "") execute_selection ;;
+        *) ;;
+    esac
+}
+
+fetch_hosts() {
+    readarray -t hosts < <(sort -u < "$file")
+
+    (( ${#hosts[@]} < 1 )) && exit 1
+
+    hosts+=("" "[R]un command" "[C]lear selection" "[Q]uit")
+
+    last_host=$(( ${#hosts[@]} - 5 ))
+    empty_line=$(( ${#hosts[@]} - 4 ))
+    run_command=$(( ${#hosts[@]} - 3 ))
+    clear_selection=$(( ${#hosts[@]} - 2 ))
+    quit=$(( ${#hosts[@]} - 1 ))
+
+    (( ${#hosts[@]} > lines )) && { printf "Too many hosts for console lines\n" >&2; exit 1; }
+}
+
+get_args() {
+    local option
+
+    while getopts ':f:hv' option; do
+        case "$option" in
+            f) file="$OPTARG" ;;
+            h) usage; exit 0 ;;
+            v) printf "%s\n" "$VERSION"; exit 0 ;;
+            ?)
+                printf "rc: invalid option -- '%s'\n" "$OPTARG" >&2
+                printf "Try 'rc -h' for more information.\n" >&2; exit 1
+            ;;
+        esac
+    done
+
+    shift "$(( OPTIND -1 ))"
+
+    [[ -f "$file" ]] || { printf "File not found: '%s'\n" "$file" >&2; exit 1; }
+}
+
+main() {
+    file="${HOME}/.config/rc/hosts"
+    grey='\033[0;30m'
+    reset='\033[0m'
+    bold='\033[1m'
+    lines="$(tput lines)"
+    selected=0
+
+    declare -A selected_hosts
+
+    get_args "$@"
+    fetch_hosts
+
+    set -o emacs
+    trap 'tput cnorm; printf "\n"' EXIT
+
+    while true; do
+        tput clear civis
+        print_menu
+        get_selection
+    done
+}
+
+main "$@"
