@@ -3,7 +3,7 @@
 # Remote Command (rc): A command-line System Administration tool written in bash 4.2+.
 # https://github.com/zpiatt/rc
 #
-# Copyright (C) 2025 Zac Piatt
+# Copyright (C) 2026 Zac Piatt
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,22 +18,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.1.0-beta - October 26, 2026"
+readonly VERSION="Remote Command (rc) version: 0.2.0-beta - August 13, 2026"
 
 usage() {
-    printf "Usage: rc [OPTION]... [SYSTEM/APPLICATION]...\n"
-    printf "Connect to/run remote commands on target systems by application name.\n\n"
+    printf "Usage: rc [OPTION]...\n"
+    printf "Initialize connection or execute remote commands on target systems.\n\n"
     printf " -f, specify host list as file (rc -f hosts.txt)\n"
     printf " -h, display help and exit\n"
     printf " -v, display version number and exit\n\n"
     printf "Interaction keys:\n"
-    printf " SPACEBAR - toggle host selection\n"
-    printf " ENTER - execute selection\n"
-    printf " (SSH to currently highlighted host OR executes run command/clear selection/QUIT)\n"
-    printf " UP\DOWN arrows - move cursor\n"
-    printf " r - move cursor to 'run command' option\n"
-    printf " c - move cursor to 'clear selection' option\n"
-    printf " q - move cursor to 'QUIT' option\n\n"
+    printf "  SPACEBAR, toggle host selection\n"
+    printf "  ENTER, execute selection\n"
+    printf "  UP\DOWN arrows, move cursor\n"
+    printf "  r, move cursor to 'run command'\n"
+    printf "  c, move cursor to 'clear selection'\n"
+    printf "  q, move cursor to 'quit'\n\n"
     printf "Full documentation <https://github.com/zpiatt/rc>\n"
 }
 
@@ -50,7 +49,7 @@ run_command() {
     history -w "$history_file"
 
     for host in "${!selected_hosts[@]}"; do
-        printf "%b%s@%s [%s]:%b\n" "$grey" "$USER" "$host" "$(date)" "$reset"
+        printf "%s@%s [%s]:\n" "$USER" "$host" "$(date)"
         ssh -qto ConnectTimeout=3 "$host" "$remote_command" || \
             { (( $? == 255 )) && printf "SSH failed: %s\n\n" "$host" >&2; }
     done
@@ -59,7 +58,10 @@ run_command() {
 }
 
 print_menu() {
-    local index host
+    local reset bold index host
+
+    reset='\033[0m'
+    bold='\033[1m'
 
     for index in "${!hosts[@]}"; do
         if (( index == selected )); then
@@ -69,22 +71,21 @@ print_menu() {
         fi
     done
 
-    if (( ${#selected_hosts[@]} > 0 )); then
-        printf "\n selected hosts:\n"
+    if [[ -n "${selected_hosts[*]}" ]]; then
+        printf "\n  selected hosts:\n"
         for host in "${!selected_hosts[@]}"; do
-            printf " %s\n" "$host"
+            printf "    %s\n" "$host"
         done
     fi
 
     tput cup $(( lines - 1 )) 0
-
-    printf "%bSPACEBAR%b - toggle selection %bENTER%b - SSH/execute option %bUP/DOWN%b - move cursor" \
+    printf "%bSPACEBAR%b - toggle selection    %bENTER%b - SSH/execute option    %bUP/DOWN%b - move cursor" \
         "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
 }
 
 execute_selection() {
     case "$selected" in
-        "$run_command") (( ${selected_hosts[@]} > 0 )) && run_command ;;
+        "$run_command") [[ -n "${selected_hosts[*]}" ]] && run_command ;;
         "$clear_selection") selected_hosts=() ;;
         "$quit") exit 0 ;;
         *)
@@ -140,17 +141,18 @@ get_selection() {
 fetch_hosts() {
     readarray -t hosts < <(sort -u < "$file")
 
-    (( ${#hosts[@]} < 1 )) && exit 1
+    [[ -z "${hosts[*]}" ]] && exit 1
 
     hosts+=("" "[R]un command" "[C]lear selection" "[Q]uit")
 
+    lines="$(tput lines)"
     last_host=$(( ${#hosts[@]} - 5 ))
     empty_line=$(( ${#hosts[@]} - 4 ))
     run_command=$(( ${#hosts[@]} - 3 ))
     clear_selection=$(( ${#hosts[@]} - 2 ))
     quit=$(( ${#hosts[@]} - 1 ))
 
-    (( ${#hosts[@]} > lines )) && { printf "Too many hosts for console lines\n" >&2; exit 1; }
+    (( ${#hosts[@]} > lines )) && { printf "Too many hosts to display in current console size\n"  >&2; exit 1; }
 }
 
 get_args() {
@@ -170,24 +172,19 @@ get_args() {
 
     shift "$(( OPTIND -1 ))"
 
-    [[ -f "$file" ]] || { printf "File not found: '%s'\n" "$file" >&2; exit 1; }
+    [[ -f "$file" ]] || { printf "file not found: '%s'\n" "$file" >&2; exit 1; }
 }
 
 main() {
     file="${HOME}/.config/rc/hosts"
-    grey='\033[0;30m'
-    reset='\033[0m'
-    bold='\033[1m'
-    lines="$(tput lines)"
-    selected=0
-
-    declare -A selected_hosts
-
     get_args "$@"
     fetch_hosts
 
     set -o emacs
     trap 'tput cnorm; printf "\n"' EXIT
+
+    selected=0
+    declare -A selected_hosts
 
     while true; do
         tput clear civis
