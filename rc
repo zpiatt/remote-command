@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.3.0-beta - August 14, 2026"
+readonly VERSION="Remote Command (rc) version: 0.3.1-beta - August 14, 2026"
 
 usage() {
     printf "Usage: rc [OPTION]...\n"
@@ -145,7 +145,7 @@ get_selection() {
 filter_hosts() {
     local filtered_hosts
 
-    filtered_hosts="$(awk '!/^\s*$/ && !x[$1]++ {print $1}' "$file")"
+    filtered_hosts="$(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")"
 
     if [[ -n "$icmp" ]]; then
         filtered_hosts="$(echo "$filtered_hosts" | \
@@ -166,7 +166,7 @@ fetch_hosts() {
     if [[ -n "$icmp" || -n "$tcp" || -n "$port" ]]; then
         filter_hosts
     else
-        readarray -t hosts < <(sort -u < "$file")
+        readarray -t hosts < <(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")
     fi
 
     [[ -z "${hosts[*]}" ]] && { printf "No matching hosts.\n" >&2; exit 1; }
