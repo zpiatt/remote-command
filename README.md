@@ -6,7 +6,13 @@
 Remote Command (rc) is a command line system administration remote management tool written in `bash 4.2+`.
 
 ### Recently added:
+  - Added `-f` option to specify host file.
+  - Added `-i` option to filter host list with `ICMP`.
+  - Added `-p` option to filter host list by attempting `tcp` handshakes on specified port.
+  - Added `-t` option to filter host list by attempting `tcp` handshakes on port `22`.
+  - Added `-u` option to specify username.
 
 ### Upcoming features:
+  - Still getting the idea on paper. I'll make a release when this is ready for install.
 
 ### More:

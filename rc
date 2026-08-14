@@ -18,78 +18,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.3.1-beta - August 14, 2026"
+readonly VERSION="Remote Command (rc) version: 0.4.0-beta - August 14, 2026"
 
-usage() {
-    printf "Usage: rc [OPTION]...\n"
-    printf "Initialize connection or execute remote commands on target systems.\n\n"
-    printf " -f, specify host list as file (rc -f hosts.txt)\n"
-    printf " -h, display help and exit\n"
-    printf " -i, filter host list with ICMP\n"
-    printf " -p, filter host list with TCP handshake on specified port\n"
-    printf " -t, filter host list with TCP handshake on port 22\n"
-    printf " -u, specify username\n"
-    printf " -v, display version number and exit\n\n"
-    printf "Interaction keys:\n"
-    printf "  SPACEBAR, toggle host selection\n"
-    printf "  ENTER, execute selection\n"
-    printf "  UP\DOWN arrows, move cursor\n"
-    printf "  r, move cursor to 'run command'\n"
-    printf "  c, move cursor to 'clear selection'\n"
-    printf "  q, move cursor to 'quit'\n\n"
-    printf "Full documentation <https://github.com/zpiatt/rc>\n"
-}
-
-run_command() {
-    local history_file remote_command confirm host
-
-    history_file="${HOME}/.bash_history"
-    history -r "$history_file"
-    read -erp $'\nEnter remote command: ' remote_command
-    printf "Run: '%s'\n" "$remote_command"
-    read -erp "on selected hosts? [y/N]: " confirm
-    [[ "${confirm,,}" =~ ^y(es)?$ ]] || return 0
-    history -s "$remote_command"
-    history -w "$history_file"
-
-    for host in "${!selected_hosts[@]}"; do
-        printf "%s@%s [%s]:\n" "$USER" "$host" "$(date)"
-        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" || \
-            { (( $? == 255 )) && printf "SSH failed: %s\n\n" "$host" >&2; }
-    done
-
-    read -rsp $'\nPress any key to continue' -n1
-}
-
-print_menu() {
-    local reset bold index host
-
-    reset='\033[0m'
-    bold='\033[1m'
-
-    for index in "${!hosts[@]}"; do
-        if (( index == selected )); then
-            printf "\e[7m%s\e[27m\n" "${hosts[$index]}"
-        else
-            printf "%s\n" "${hosts[$index]}"
-        fi
-    done
-
-    if [[ -n "${selected_hosts[*]}" ]]; then
-        printf "\n  selected hosts:\n"
-        for host in "${!selected_hosts[@]}"; do
-            printf "    %s\n" "$host"
-        done
-    fi
-
-    tput cup $(( lines - 1 )) 0
-    printf "%bSPACEBAR%b - toggle selection\t%bENTER%b - SSH/execute option\t%bUP/DOWN%b - move cursor" \
-        "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
-}
 
 execute_selection() {
     case "$selected" in
-        "$run_command") [[ -n "${selected_hosts[*]}" ]] && run_command ;;
+        "$run_command") [[ "${#selected_hosts[@]}" -gt 0 ]] && run_command ;;
         "$clear_selection") selected_hosts=() ;;
         "$quit") exit 0 ;;
         *)
@@ -101,73 +35,13 @@ execute_selection() {
     esac
 }
 
-toggle_selection() {
-    if [[ -n "${selected_hosts[${hosts[$selected]}]}" ]]; then
-        unset "selected_hosts[${hosts[$selected]}]"
-    else
-        selected_hosts["${hosts[$selected]}"]=1
-    fi
-}
-
-move_cursor() {
-    local direction="$1"
-
-    (( selected += direction ))
-    (( selected > quit )) && selected=0
-    (( selected < 0 )) && selected="$quit"
-    (( selected == empty_line )) && selected=$(( selected + direction ))
-}
-
-get_selection() {
-    local key
-
-    IFS= read -rsn1 key
-    case "${key,,}" in
-        r) selected="$run_command" ;;
-        c) selected="$clear_selection" ;;
-        q) selected="$quit" ;;
-        k) move_cursor -1 ;;
-        j) move_cursor 1 ;;
-        $'\e')
-            read -rsn2 key
-            case "$key" in
-                "[A") move_cursor -1 ;;
-                "[B") move_cursor 1 ;;
-            esac
-        ;;
-
-        $'\x20') (( selected <= last_host )) && toggle_selection ;;
-        "") execute_selection ;;
-        *) ;;
-    esac
-}
-
-filter_hosts() {
-    local filtered_hosts
-
-    filtered_hosts="$(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")"
-
-    if [[ -n "$icmp" ]]; then
-        filtered_hosts="$(echo "$filtered_hosts" | \
-            xargs -P 50 -I {} sh -c 'ping -W1 -c1 "{}" &> /dev/null && echo "{}"' \
-        )"
-    fi
-
-    if [[ -n "$tcp" || -n "$port" ]]; then
-        filtered_hosts="$(echo "$filtered_hosts" | \
-            xargs -P 50 -I {} bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}" \
-        )"
-    fi
-
-    readarray -t hosts < <(echo "$filtered_hosts")
-}
 
 fetch_hosts() {
-    if [[ -n "$icmp" || -n "$tcp" || -n "$port" ]]; then
-        filter_hosts
-    else
-        readarray -t hosts < <(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")
-    fi
+    hosts="$(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")"
+
+    [[ -n "$icmp" || -n "$tcp" || -n "$port" ]] && filter_hosts
+
+    readarray -t hosts < <(echo "$hosts")
 
     [[ -z "${hosts[*]}" ]] && { printf "No matching hosts.\n" >&2; exit 1; }
 
@@ -180,8 +54,25 @@ fetch_hosts() {
     clear_selection=$(( ${#hosts[@]} - 2 ))
     quit=$(( ${#hosts[@]} - 1 ))
 
-    (( ${#hosts[@]} > lines )) && { printf "Too many hosts to display in current console size\n"  >&2; exit 1; }
+    (( ${#hosts[@]} > lines )) && \
+        { printf "Too many hosts to display in current console size\n"  >&2; exit 1; }
 }
+
+
+filter_hosts() {
+    if [[ -n "$icmp" ]]; then
+        hosts="$(echo "$hosts" | \
+            xargs -P 50 -I {} sh -c 'ping -W1 -c1 "{}" &> /dev/null && echo "{}"' \
+        )"
+    fi
+
+    if [[ -n "$tcp" || -n "$port" ]]; then
+        hosts="$(echo "$hosts" | \
+            xargs -P 50 -I {} \
+            bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}")"
+    fi
+}
+
 
 get_args() {
     local option
@@ -207,20 +98,135 @@ get_args() {
     [[ -f "$file" ]] || { printf "file not found: '%s'\n" "$file" >&2; exit 1; }
 }
 
+
+get_selection() {
+    local key
+
+    IFS= read -rsn1 key
+    case "${key,,}" in
+        r) selected="$run_command" ;;
+        c) selected="$clear_selection" ;;
+        q) selected="$quit" ;;
+        k) move_cursor -1 ;;
+        j) move_cursor 1 ;;
+        $'\e')
+            read -rsn2 key
+            case "$key" in
+                "[A") move_cursor -1 ;;
+                "[B") move_cursor 1 ;;
+            esac
+        ;;
+
+        $'\x20') (( selected <= last_host )) && toggle_selection ;;
+        "") execute_selection ;;
+        *) ;;
+    esac
+}
+
+
+move_cursor() {
+    local direction="$1"
+
+    (( selected += direction ))
+    (( selected > quit )) && selected=0
+    (( selected < 0 )) && selected="$quit"
+    (( selected == empty_line )) && selected=$(( selected + direction ))
+}
+
+
+print_menu() {
+    local reset bold index host
+
+    reset='\033[0m'
+    bold='\033[1m'
+
+    for index in "${!hosts[@]}"; do
+        if (( index == selected )); then
+            printf "\e[7m%s\e[27m\n" "${hosts[$index]}"
+        else
+            printf "%s\n" "${hosts[$index]}"
+        fi
+    done
+
+    if [[ "${#selected_hosts[*]}" -gt 0 ]]; then
+        printf "\nselected hosts:\n"
+        for host in "${!selected_hosts[@]}"; do
+            printf "  %s\n" "$host"
+        done
+    fi
+
+    tput cup $(( lines - 1 )) 0
+    printf \
+        "%bSPACEBAR%b - toggle selection\t%bENTER%b - SSH/execute option\t%bUP/DOWN%b - move cursor" \
+        "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
+}
+
+
+run_command() {
+    local history_file remote_command confirm host
+
+    history_file="${HOME}/.bash_history"
+    history -r "$history_file"
+
+    tput cnorm
+    read -erp $'\nEnter remote command: ' remote_command
+    printf "Run: '%s'\n" "$remote_command"
+    read -erp "on selected hosts? [y/N]: " confirm
+    tput civis
+
+    [[ "${confirm,,}" =~ ^y(es)?$ ]] || return 0
+
+    history -s "$remote_command"
+    history -w "$history_file"
+
+    for host in "${!selected_hosts[@]}"; do
+        printf "%s@%s [%s]:\n" "$USER" "$host" "$(date)"
+        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" || \
+            { (( $? == 255 )) && printf "SSH failed: %s\n\n" "$host" >&2; }
+    done
+
+    read -rsp $'\nPress any key to continue' -n1
+}
+
+
+toggle_selection() {
+    if [[ -n "${selected_hosts[${hosts[$selected]}]}" ]]; then
+        unset "selected_hosts[${hosts[$selected]}]"
+    else
+        selected_hosts["${hosts[$selected]}"]=1
+    fi
+}
+
+
+usage() {
+    printf "Usage: rc [OPTION]...\n"
+    printf "Initialize connection or execute remote commands on target systems.\n\n"
+    printf " -f, specify host list as file (rc -f hosts.txt)\n"
+    printf " -h, display help and exit\n"
+    printf " -i, filter host list with ICMP\n"
+    printf " -p, filter host list with TCP handshake on specified port\n"
+    printf " -t, filter host list with TCP handshake on port 22\n"
+    printf " -u, specify username\n"
+    printf " -v, display version number and exit\n\n"
+    printf "Full documentation <https://github.com/zpiatt/remote-command>\n"
+}
+
+
 main() {
     file="${HOME}/.config/rc/hosts"
+    user="$USER"
+    selected=0
+    declare -A selected_hosts
+
     get_args "$@"
-    user="${user:-$USER}"
     fetch_hosts
 
     set -o emacs
     trap 'tput cnorm; printf "\n"' EXIT
-
-    selected=0
-    declare -A selected_hosts
+    tput civis
 
     while true; do
-        tput clear civis
+        tput clear
         print_menu
         get_selection
     done
