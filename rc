@@ -18,13 +18,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.2.0-beta - August 13, 2026"
+readonly VERSION="Remote Command (rc) version: 0.3.0-beta - August 14, 2026"
 
 usage() {
     printf "Usage: rc [OPTION]...\n"
     printf "Initialize connection or execute remote commands on target systems.\n\n"
     printf " -f, specify host list as file (rc -f hosts.txt)\n"
     printf " -h, display help and exit\n"
+    printf " -i, filter host list with ICMP\n"
+    printf " -p, filter host list with TCP handshake on specified port\n"
+    printf " -t, filter host list with TCP handshake on port 22\n"
+    printf " -u, specify username\n"
     printf " -v, display version number and exit\n\n"
     printf "Interaction keys:\n"
     printf "  SPACEBAR, toggle host selection\n"
@@ -50,7 +54,7 @@ run_command() {
 
     for host in "${!selected_hosts[@]}"; do
         printf "%s@%s [%s]:\n" "$USER" "$host" "$(date)"
-        ssh -qto ConnectTimeout=3 "$host" "$remote_command" || \
+        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" || \
             { (( $? == 255 )) && printf "SSH failed: %s\n\n" "$host" >&2; }
     done
 
@@ -79,7 +83,7 @@ print_menu() {
     fi
 
     tput cup $(( lines - 1 )) 0
-    printf "%bSPACEBAR%b - toggle selection    %bENTER%b - SSH/execute option    %bUP/DOWN%b - move cursor" \
+    printf "%bSPACEBAR%b - toggle selection\t%bENTER%b - SSH/execute option\t%bUP/DOWN%b - move cursor" \
         "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
 }
 
@@ -90,7 +94,7 @@ execute_selection() {
         "$quit") exit 0 ;;
         *)
             tput clear cnorm
-            ssh -qo ConnectTimeout=3 "${hosts[$selected]}" || \
+            ssh -qo ConnectTimeout=3 "${user}@${hosts[$selected]}" || \
                 { (( "$?" == 255 )) && printf "SSH failed: %s\n\n" "${hosts[$selected]}" >&2
                 read -rsp $'\nPress any key to continue' -n1; }
         ;;
@@ -138,10 +142,34 @@ get_selection() {
     esac
 }
 
-fetch_hosts() {
-    readarray -t hosts < <(sort -u < "$file")
+filter_hosts() {
+    local filtered_hosts
 
-    [[ -z "${hosts[*]}" ]] && exit 1
+    filtered_hosts="$(awk '!/^\s*$/ && !x[$1]++ {print $1}' "$file")"
+
+    if [[ -n "$icmp" ]]; then
+        filtered_hosts="$(echo "$filtered_hosts" | \
+            xargs -P 50 -I {} sh -c 'ping -W1 -c1 "{}" &> /dev/null && echo "{}"' \
+        )"
+    fi
+
+    if [[ -n "$tcp" || -n "$port" ]]; then
+        filtered_hosts="$(echo "$filtered_hosts" | \
+            xargs -P 50 -I {} bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}" \
+        )"
+    fi
+
+    readarray -t hosts < <(echo "$filtered_hosts")
+}
+
+fetch_hosts() {
+    if [[ -n "$icmp" || -n "$tcp" || -n "$port" ]]; then
+        filter_hosts
+    else
+        readarray -t hosts < <(sort -u < "$file")
+    fi
+
+    [[ -z "${hosts[*]}" ]] && { printf "No matching hosts.\n" >&2; exit 1; }
 
     hosts+=("" "[R]un command" "[C]lear selection" "[Q]uit")
 
@@ -158,10 +186,14 @@ fetch_hosts() {
 get_args() {
     local option
 
-    while getopts ':f:hv' option; do
+    while getopts ':f:hip:tu:v' option; do
         case "$option" in
             f) file="$OPTARG" ;;
             h) usage; exit 0 ;;
+            i) icmp="true" ;;
+            p) port="$OPTARG" ;;
+            t) tcp="true" ;;
+            u) user="$OPTARG" ;;
             v) printf "%s\n" "$VERSION"; exit 0 ;;
             ?)
                 printf "rc: invalid option -- '%s'\n" "$OPTARG" >&2
@@ -178,6 +210,7 @@ get_args() {
 main() {
     file="${HOME}/.config/rc/hosts"
     get_args "$@"
+    user="${user:-$USER}"
     fetch_hosts
 
     set -o emacs
