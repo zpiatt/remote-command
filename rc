@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.4.0-beta - August 14, 2026"
+readonly VERSION="Remote Command (rc) version: 0.4.1-beta - August 15, 2026"
 
 
 execute_selection() {
@@ -27,10 +27,10 @@ execute_selection() {
         "$clear_selection") selected_hosts=() ;;
         "$quit") exit 0 ;;
         *)
-            tput clear cnorm
-            ssh -qo ConnectTimeout=3 "${user}@${hosts[$selected]}" || \
-                { (( "$?" == 255 )) && printf "SSH failed: %s\n\n" "${hosts[$selected]}" >&2
-                read -rsp $'\nPress any key to continue' -n1; }
+            tput clear
+            tput cnorm
+            ssh -qo ConnectTimeout=3 "${user}@${hosts[$selected]}"
+            tput civis
         ;;
     esac
 }
@@ -62,8 +62,7 @@ fetch_hosts() {
 filter_hosts() {
     if [[ -n "$icmp" ]]; then
         hosts="$(echo "$hosts" | \
-            xargs -P 50 -I {} sh -c 'ping -W1 -c1 "{}" &> /dev/null && echo "{}"' \
-        )"
+            xargs -P 50 -I {} bash -c "ping -W1 -c1 {} &> /dev/null && echo {}")"
     fi
 
     if [[ -n "$tcp" || -n "$port" ]]; then
@@ -157,7 +156,7 @@ print_menu() {
 
     tput cup $(( lines - 1 )) 0
     printf \
-        "%bSPACEBAR%b - toggle selection\t%bENTER%b - SSH/execute option\t%bUP/DOWN%b - move cursor" \
+        "%bSPACEBAR%b - toggle host selection\t%bENTER%b - SSH/execute option\t%bUP/DOWN%b - move cursor" \
         "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
 }
 
@@ -181,8 +180,7 @@ run_command() {
 
     for host in "${!selected_hosts[@]}"; do
         printf "%s@%s [%s]:\n" "$USER" "$host" "$(date)"
-        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" || \
-            { (( $? == 255 )) && printf "SSH failed: %s\n\n" "$host" >&2; }
+        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command"
     done
 
     read -rsp $'\nPress any key to continue' -n1
@@ -223,10 +221,10 @@ main() {
 
     set -o emacs
     trap 'tput cnorm; printf "\n"' EXIT
-    tput civis
 
     while true; do
         tput clear
+        tput civis
         print_menu
         get_selection
     done
