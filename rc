@@ -18,12 +18,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.4.1-beta - August 15, 2026"
+readonly VERSION="Remote Command (rc) version: 0.4.2-beta - August 16, 2026"
 
 
 execute_selection() {
     case "$selected" in
         "$run_command") [[ "${#selected_hosts[@]}" -gt 0 ]] && run_command ;;
+        "$select_all") toggle_all ;;
         "$clear_selection") selected_hosts=() ;;
         "$quit") exit 0 ;;
         *)
@@ -37,20 +38,19 @@ execute_selection() {
 
 
 fetch_hosts() {
-    hosts="$(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")"
+    readarray -t hosts < <(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")
 
     [[ -n "$icmp" || -n "$tcp" || -n "$port" ]] && filter_hosts
 
-    readarray -t hosts < <(echo "$hosts")
-
     [[ -z "${hosts[*]}" ]] && { printf "No matching hosts.\n" >&2; exit 1; }
 
-    hosts+=("" "[R]un command" "[C]lear selection" "[Q]uit")
+    hosts+=("" "[R]un command" "[S]elect all" "[C]lear selection" "[Q]uit")
 
     lines="$(tput lines)"
-    last_host=$(( ${#hosts[@]} - 5 ))
-    empty_line=$(( ${#hosts[@]} - 4 ))
-    run_command=$(( ${#hosts[@]} - 3 ))
+    last_host=$(( ${#hosts[@]} - 6 ))
+    empty_line=$(( ${#hosts[@]} - 5 ))
+    run_command=$(( ${#hosts[@]} - 4 ))
+    select_all=$(( ${#hosts[@]} - 3 ))
     clear_selection=$(( ${#hosts[@]} - 2 ))
     quit=$(( ${#hosts[@]} - 1 ))
 
@@ -60,16 +60,25 @@ fetch_hosts() {
 
 
 filter_hosts() {
+    declare -a icmp_hosts tcp_hosts
+
     if [[ -n "$icmp" ]]; then
-        hosts="$(echo "$hosts" | \
-            xargs -P 50 -I {} bash -c "ping -W1 -c1 {} &> /dev/null && echo {}")"
+        while read -r host; do
+           icmp_hosts+=("$host") 
+        done < <(printf "%s\n" "${hosts[@]}" | \
+                    xargs -P 50 -I {} bash -c "ping -W1 -c1 {} &> /dev/null && echo {}"
+                )
     fi
 
     if [[ -n "$tcp" || -n "$port" ]]; then
-        hosts="$(echo "$hosts" | \
-            xargs -P 50 -I {} \
-            bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}")"
+        while read -r host; do
+           tcp_hosts+=("$host") 
+        done < <(printf "%s\n" "${hosts[@]}" | xargs -P 50 -I {} \
+                    bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}"
+                )
     fi
+
+    hosts=("${icmp_hosts[@]}" "${tcp_hosts[@]}")
 }
 
 
@@ -104,6 +113,7 @@ get_selection() {
     IFS= read -rsn1 key
     case "${key,,}" in
         r) selected="$run_command" ;;
+        s) selected="$select_all" ;;
         c) selected="$clear_selection" ;;
         q) selected="$quit" ;;
         k) move_cursor -1 ;;
@@ -134,10 +144,7 @@ move_cursor() {
 
 
 print_menu() {
-    local reset bold index host
-
-    reset='\033[0m'
-    bold='\033[1m'
+    local index host
 
     for index in "${!hosts[@]}"; do
         if (( index == selected )); then
@@ -179,11 +186,20 @@ run_command() {
     history -w "$history_file"
 
     for host in "${!selected_hosts[@]}"; do
-        printf "%s@%s [%s]:\n" "$USER" "$host" "$(date)"
-        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command"
-    done
+        printf "\n%b%s@%s [%s]%b: %s\n" "$bold" "$user" "$host" "$(date)" "$reset" "$remote_command"
+        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" | expand -t 4
+    done | less +F -SRM
+}
 
-    read -rsp $'\nPress any key to continue' -n1
+
+toggle_all() {
+    local index
+
+    for index in "${!hosts[@]}"; do
+        if (( index < empty_line )); then
+            selected_hosts["${hosts[$index]}"]=1
+        fi
+    done
 }
 
 
@@ -201,10 +217,10 @@ usage() {
     printf "Initialize connection or execute remote commands on target systems.\n\n"
     printf " -f, specify host list as file (rc -f hosts.txt)\n"
     printf " -h, display help and exit\n"
-    printf " -i, filter host list with ICMP\n"
-    printf " -p, filter host list with TCP handshake on specified port\n"
-    printf " -t, filter host list with TCP handshake on port 22\n"
-    printf " -u, specify username\n"
+    printf " -i, filter hosts with ICMP echo-request\n"
+    printf " -p, filter hosts with TCP handshake on specified port (rc -p 443)\n"
+    printf " -t, filter hosts with TCP handshake on port 22\n"
+    printf " -u, specify remote user name\n"
     printf " -v, display version number and exit\n\n"
     printf "Full documentation <https://github.com/zpiatt/remote-command>\n"
 }
@@ -215,6 +231,8 @@ main() {
     user="$USER"
     selected=0
     declare -A selected_hosts
+    reset='\033[0m'
+    bold='\033[1m'
 
     get_args "$@"
     fetch_hosts

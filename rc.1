@@ -4,6 +4,9 @@ Remote Command \- remote management system administration tool.
 .SH SYNOPSIS
 .B rc
 [\fI\,OPTION\/\fR]...
+.PP
+.B rc
+[\fI\,OPTION\/\fR]... \fB\-f\fR, [\fI\,FILE\/\fR]...
 .SH DESCRIPTION
 Placeholder
 .BR
@@ -11,8 +14,28 @@ Placeholder
 Placeholder
 .SH OPTIONS
 .TP
+\fB\-f\fR,
+specify host list as \fI\,FILE\/\fR (\fB\ rc -f\fR hosts.txt )
+.BR
+.TP
 \fB\-h\fR,
 display help and exit
+.BR
+.TP
+\fB\-i\fR,
+filter hosts with ICMP echo-request
+.BR
+.TP
+\fB\-p\fR,
+filter hosts with TCP handshake on specified port (\fB\ rc -p\fR 443 )
+.BR
+.TP
+\fB\-t\fR,
+filter hosts with TCP handshake on port 22
+.BR
+.TP
+\fB\-u\fR,
+specify remote user name
 .BR
 .TP
 \fB\-v\fR,
