@@ -18,13 +18,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.4.2-beta - August 16, 2026"
+readonly VERSION="Remote Command (rc) version: 0.4.3-beta - August 16, 2026"
 
 
 execute_selection() {
     case "$selected" in
         "$run_command") [[ "${#selected_hosts[@]}" -gt 0 ]] && run_command ;;
-        "$select_all") toggle_all ;;
+        "$select_all")
+            local host
+
+            for host in "${hosts[@]:0:${empty_line}}"; do
+                selected_hosts["$host"]=1
+            done
+        ;;
+
         "$clear_selection") selected_hosts=() ;;
         "$quit") exit 0 ;;
         *)
@@ -60,25 +67,25 @@ fetch_hosts() {
 
 
 filter_hosts() {
-    declare -a icmp_hosts tcp_hosts
+    declare -a filtered_hosts
+
+    filtered_hosts=("${hosts[@]}")
 
     if [[ -n "$icmp" ]]; then
-        while read -r host; do
-           icmp_hosts+=("$host") 
-        done < <(printf "%s\n" "${hosts[@]}" | \
-                    xargs -P 50 -I {} bash -c "ping -W1 -c1 {} &> /dev/null && echo {}"
-                )
+        readarray -t filtered_hosts < <( \
+            printf "%s\n" "${filtered_hosts[@]}" | \
+            xargs -P 50 -I {} bash -c "ping -W1 -c1 {} &> /dev/null && echo {}"
+        )
     fi
 
     if [[ -n "$tcp" || -n "$port" ]]; then
-        while read -r host; do
-           tcp_hosts+=("$host") 
-        done < <(printf "%s\n" "${hosts[@]}" | xargs -P 50 -I {} \
-                    bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}"
-                )
+        readarray -t filtered_hosts < <( \
+            printf "%s\n" "${filtered_hosts[@]}" | xargs -P 50 -I {} \
+            bash -c "timeout 1 bash -c ':> /dev/tcp/{}/${port:-22}' &> /dev/null && echo {}"
+        )
     fi
 
-    hosts=("${icmp_hosts[@]}" "${tcp_hosts[@]}")
+    hosts=("${filtered_hosts[@]}")
 }
 
 
@@ -189,17 +196,6 @@ run_command() {
         printf "\n%b%s@%s [%s]%b: %s\n" "$bold" "$user" "$host" "$(date)" "$reset" "$remote_command"
         ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" | expand -t 4
     done | less +F -SRM
-}
-
-
-toggle_all() {
-    local index
-
-    for index in "${!hosts[@]}"; do
-        if (( index < empty_line )); then
-            selected_hosts["${hosts[$index]}"]=1
-        fi
-    done
 }
 
 
