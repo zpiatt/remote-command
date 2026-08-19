@@ -16,7 +16,7 @@ install:
 	@mkdir -p $(DESTDIR)$(USER_HOME)/.config/rc
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
 	@cp -p rc $(DESTDIR)$(PREFIX)/bin/rc
-	@cp -p hosts $(DESTDIR)$(USER_HOME)/.config/rc
+	@cp -pn hosts $(DESTDIR)$(USER_HOME)/.config/rc
 	@test -z $(SUDO_USER) || chown -R $(SUDO_USER): $(USER_HOME)/.config/rc
 	@gzip -c rc.1 > $(DESTDIR)$(MANDIR)/rc.1.gz
 	@chmod 755 $(DESTDIR)$(PREFIX)/bin/rc

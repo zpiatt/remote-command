@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.4.4-beta - August 17, 2026"
+readonly VERSION="Remote Command (rc) version: 0.4.5-beta - August 18, 2026"
 
 
 execute_selection() {
@@ -27,7 +27,7 @@ execute_selection() {
         "$select_all")
             local host
 
-            for host in "${hosts[@]:0:${empty_line}}"; do
+            for host in "${hosts[@]:0:${run_command}}"; do
                 selected_hosts["$host"]=1
             done
         ;;
@@ -51,11 +51,10 @@ fetch_hosts() {
 
     [[ -z "${hosts[*]}" ]] && { printf "No matching hosts.\n" >&2; exit 1; }
 
-    hosts+=("" "[R]un command" "[S]elect all" "[C]lear selection" "[Q]uit")
+    hosts+=("[R]un command" "[S]elect all" "[C]lear selection" "[Q]uit")
 
     lines="$(tput lines)"
-    last_host=$(( ${#hosts[@]} - 6 ))
-    empty_line=$(( ${#hosts[@]} - 5 ))
+    last_host=$(( ${#hosts[@]} - 5 ))
     run_command=$(( ${#hosts[@]} - 4 ))
     select_all=$(( ${#hosts[@]} - 3 ))
     clear_selection=$(( ${#hosts[@]} - 2 ))
@@ -126,7 +125,7 @@ get_selection() {
         k) move_cursor -1 ;;
         j) move_cursor 1 ;;
         $'\e')
-            read -rsn2 key
+            read -rsn2 -t 0.1 key
             case "$key" in
                 "[A") move_cursor -1 ;;
                 "[B") move_cursor 1 ;;
@@ -146,7 +145,6 @@ move_cursor() {
     (( selected += direction ))
     (( selected > quit )) && selected=0
     (( selected < 0 )) && selected="$quit"
-    (( selected == empty_line )) && selected=$(( selected + direction ))
 }
 
 
@@ -159,6 +157,8 @@ print_menu() {
         else
             printf "%s\n" "${hosts[$index]}"
         fi
+
+        (( index == last_host )) && printf "%s\n"
     done
 
     if [[ "${#selected_hosts[*]}" -gt 0 ]]; then
