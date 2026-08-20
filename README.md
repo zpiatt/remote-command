@@ -14,5 +14,8 @@ Remote Command (rc) is a command line system administration remote management to
 
 ### Upcoming features:
   - Still getting the idea on paper. I'll make a release when this is ready for install.
+  - Planning to add a `-l` option to simply print matching hosts and exit.
+  - Planning to add a `-r` option to pass regrex to filter host names.
+    - Also, adding `/` to search long host lists similar to `less`
 
 ### More:

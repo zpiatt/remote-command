@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.4.5-beta - August 18, 2026"
+readonly VERSION="Remote Command (rc) version: 0.5.0-beta - August 20, 2026"
 
 
 execute_selection() {
@@ -30,9 +30,15 @@ execute_selection() {
             for host in "${hosts[@]:0:${run_command}}"; do
                 selected_hosts["$host"]=1
             done
+
+            selected="$run_command"
         ;;
 
-        "$clear_selection") selected_hosts=() ;;
+        "$clear_selection")
+            selected_hosts=()
+            selected=0
+        ;;
+
         "$quit") exit 0 ;;
         *)
             tput clear
@@ -45,7 +51,7 @@ execute_selection() {
 
 
 fetch_hosts() {
-    readarray -t hosts < <(awk '!/^\s*$|^#/ && !x[$1]++ {print $1}' "$file")
+    readarray -t hosts < <(awk '!/^\s*$|^#/ && !x[tolower($1)]++ {print tolower($1)}' "$file")
 
     [[ -n "$icmp" || -n "$tcp" || -n "$port" ]] && filter_hosts
 
@@ -122,13 +128,18 @@ get_selection() {
         s) selected="$select_all" ;;
         c) selected="$clear_selection" ;;
         q) selected="$quit" ;;
+        h) (( selected > last_host )) && move_cursor -1 ;;
         k) move_cursor -1 ;;
         j) move_cursor 1 ;;
+        l) (( selected > last_host )) && move_cursor 1 ;;
+        $'\t') selected="$run_command" ;;
         $'\e')
             read -rsn2 -t 0.1 key
             case "$key" in
                 "[A") move_cursor -1 ;;
                 "[B") move_cursor 1 ;;
+                "[C") (( selected > last_host )) && move_cursor 1 ;;
+                "[D") (( selected > last_host )) && move_cursor -1 ;;
             esac
         ;;
 
@@ -149,29 +160,25 @@ move_cursor() {
 
 
 print_menu() {
-    local index host
+    local index host checkbox
 
     for index in "${!hosts[@]}"; do
-        if (( index == selected )); then
-            printf "\e[7m%s\e[27m\n" "${hosts[$index]}"
-        else
-            printf "%s\n" "${hosts[$index]}"
+        host="${hosts[$index]}"
+
+        if (( index <= last_host )); then
+            [[ -n "${selected_hosts["$host"]}" ]] && checkbox="[X]" || checkbox="[ ]"
         fi
 
-        (( index == last_host )) && printf "%s\n"
+        (( index == selected )) && host="\e[7m${host}\e[27m"
+
+        if (( index <= last_host )); then
+            printf "%s  %b\n" "$checkbox" "$host"
+        else
+            printf "%b    " "$host"
+        fi
+
+        (( index == last_host )) && printf "\n"
     done
-
-    if [[ "${#selected_hosts[*]}" -gt 0 ]]; then
-        printf "\nselected hosts:\n"
-        for host in "${!selected_hosts[@]}"; do
-            printf "  %s\n" "$host"
-        done
-    fi
-
-    tput cup $(( lines - 1 )) 0
-    printf \
-        "%bSPACEBAR%b - toggle host selection\t%bENTER%b - SSH/execute option\t%bUP/DOWN%b - move cursor" \
-        "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
 }
 
 
@@ -200,10 +207,14 @@ run_command() {
 
 
 toggle_selection() {
-    if [[ -n "${selected_hosts[${hosts[$selected]}]}" ]]; then
-        unset "selected_hosts[${hosts[$selected]}]"
+    local host
+
+    host="${hosts[$selected]}"
+
+    if [[ -n "${selected_hosts[$host]}" ]]; then
+        unset "selected_hosts[$host]"
     else
-        selected_hosts["${hosts[$selected]}"]=1
+        selected_hosts["$host"]=1
     fi
 }
 
