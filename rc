@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.5.2-beta - August 21, 2026"
+readonly VERSION="Remote Command (rc) version: 0.5.3-beta - August 21, 2026"
 
 
 execute_selection() {
@@ -202,27 +202,25 @@ print_menu() {
 
 
 run_command() {
-    local history_file remote_command confirm host
-
-    history_file="${HOME}/.bash_history"
-    history -r "$history_file"
+    local remote_command confirm host
 
     tput cnorm
     tput cup $(( total_items - 2 )) 0
+
     read -erp $'\nEnter remote command: ' remote_command
     printf "Run: '%s'\n" "$remote_command"
     read -erp "on selected hosts? [y/N]: " confirm
-    tput civis
 
     [[ "${confirm,,}" =~ ^y(es)?$ ]] || return 0
 
     history -s "$remote_command"
-    history -w "$history_file"
 
     for host in "${!selected_hosts[@]}"; do
         printf "\n%s@%s [%s]:$ %s\n" "$user" "$host" "$(date)" "$remote_command"
         ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command"
     done
+
+    tput civis
 
     read -rsp $'\nPress any key to continue' -n1
 }
