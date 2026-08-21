@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.5.0-beta - August 20, 2026"
+readonly VERSION="Remote Command (rc) version: 0.5.1-beta - August 20, 2026"
 
 
 execute_selection() {
@@ -179,6 +179,8 @@ print_menu() {
 
         (( index == last_host )) && printf "\n"
     done
+
+    tput cup $(( quit -1 )) 0
 }
 
 
@@ -200,9 +202,11 @@ run_command() {
     history -w "$history_file"
 
     for host in "${!selected_hosts[@]}"; do
-        printf "\n%b%s@%s [%s]%b: %s\n" "$bold" "$user" "$host" "$(date)" "$reset" "$remote_command"
-        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" | expand -t 4
-    done | less +F -SRM
+        printf "\n%s@%s [%s]:$ %s\n" "$user" "$host" "$(date)" "$remote_command"
+        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" 
+    done
+
+    read -rsp $'\nPress any key to continue' -n1
 }
 
 
@@ -238,14 +242,13 @@ main() {
     user="$USER"
     selected=0
     declare -A selected_hosts
-    reset='\033[0m'
-    bold='\033[1m'
 
     get_args "$@"
     fetch_hosts
 
     set -o emacs
     trap 'tput cnorm; tput clear' EXIT
+    trap '' INT
 
     while true; do
         tput clear
