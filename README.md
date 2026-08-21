@@ -9,13 +9,13 @@ Remote Command (rc) is a command line system administration remote management to
   - Added `-f` option to specify host file.
   - Added `-i` option to filter host list with `ICMP`.
   - Added `-p` option to filter host list by attempting `tcp` handshakes on specified port.
+  - Added `-r` option to filter host list by matching given regex.
   - Added `-t` option to filter host list by attempting `tcp` handshakes on port `22`.
   - Added `-u` option to specify username.
 
 ### Upcoming features:
   - Still getting the idea on paper. I'll make a release when this is ready for install.
   - Planning to add a `-l` option to simply print matching hosts and exit.
-  - Planning to add a `-r` option to pass regrex to filter host names.
-    - Also, adding `/` to search long host lists similar to `less`
+  - Planning to add a `/` to search long host lists similar to `less`
 
 ### More:

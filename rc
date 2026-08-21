@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-readonly VERSION="Remote Command (rc) version: 0.5.1-beta - August 20, 2026"
+readonly VERSION="Remote Command (rc) version: 0.5.2-beta - August 21, 2026"
 
 
 execute_selection() {
@@ -27,7 +27,7 @@ execute_selection() {
         "$select_all")
             local host
 
-            for host in "${hosts[@]:0:${run_command}}"; do
+            for host in "${hosts[@]}"; do
                 selected_hosts["$host"]=1
             done
 
@@ -53,21 +53,24 @@ execute_selection() {
 fetch_hosts() {
     readarray -t hosts < <(awk '!/^\s*$|^#/ && !x[tolower($1)]++ {print tolower($1)}' "$file")
 
-    [[ -n "$icmp" || -n "$tcp" || -n "$port" ]] && filter_hosts
-
+    [[ -n "$icmp" || -n "$tcp" || -n "$port" || -n "$regex" ]] && filter_hosts
     [[ -z "${hosts[*]}" ]] && { printf "No matching hosts.\n" >&2; exit 1; }
 
-    hosts+=("[R]un command" "[S]elect all" "[C]lear selection" "[Q]uit")
+    menu_options=("[R]un command" "[S]elect all" "[C]lear selection" "[Q]uit")
+
+    num_hosts="${#hosts[@]}"
+    num_options="${#menu_options[@]}"
+
+    run_command="$num_hosts"
+    select_all=$(( num_hosts + 1 ))
+    clear_selection=$(( num_hosts + 2 ))
+    quit=$(( num_hosts + 3 ))
 
     lines="$(tput lines)"
-    last_host=$(( ${#hosts[@]} - 5 ))
-    run_command=$(( ${#hosts[@]} - 4 ))
-    select_all=$(( ${#hosts[@]} - 3 ))
-    clear_selection=$(( ${#hosts[@]} - 2 ))
-    quit=$(( ${#hosts[@]} - 1 ))
+    total_items=$(( num_hosts + num_options ))
 
-    (( ${#hosts[@]} > lines )) && \
-        { printf "Too many hosts to display in current console size\n"  >&2; exit 1; }
+    (( total_items > lines )) && \
+        { printf "Too many items to display in current console size\n"  >&2; exit 1; }
 }
 
 
@@ -75,6 +78,13 @@ filter_hosts() {
     declare -a filtered_hosts
 
     filtered_hosts=("${hosts[@]}")
+
+    if [[ -n "$regex" ]]; then
+        readarray -t filtered_hosts < <( \
+            printf "%s\n" "${filtered_hosts[@]}" | xargs -P 50 -I {} \
+            bash -c "[[ {} =~ $regex ]] && echo {}"
+        )
+    fi
 
     if [[ -n "$icmp" ]]; then
         readarray -t filtered_hosts < <( \
@@ -97,12 +107,13 @@ filter_hosts() {
 get_args() {
     local option
 
-    while getopts ':f:hip:tu:v' option; do
+    while getopts ':f:hip:r:tu:v' option; do
         case "$option" in
             f) file="$OPTARG" ;;
             h) usage; exit 0 ;;
             i) icmp="true" ;;
             p) port="$OPTARG" ;;
+            r) regex="$OPTARG" ;;
             t) tcp="true" ;;
             u) user="$OPTARG" ;;
             v) printf "%s\n" "$VERSION"; exit 0 ;;
@@ -128,23 +139,27 @@ get_selection() {
         s) selected="$select_all" ;;
         c) selected="$clear_selection" ;;
         q) selected="$quit" ;;
-        h) (( selected > last_host )) && move_cursor -1 ;;
+        h) (( selected > num_hosts )) && move_cursor -1 ;;
         k) move_cursor -1 ;;
         j) move_cursor 1 ;;
-        l) (( selected > last_host )) && move_cursor 1 ;;
+        l) (( selected > ( num_hosts -1 ) && selected <= ( quit - 1 ) )) && move_cursor 1 ;;
         $'\t') selected="$run_command" ;;
         $'\e')
             read -rsn2 -t 0.1 key
             case "$key" in
                 "[A") move_cursor -1 ;;
                 "[B") move_cursor 1 ;;
-                "[C") (( selected > last_host )) && move_cursor 1 ;;
-                "[D") (( selected > last_host )) && move_cursor -1 ;;
+                "[C") (( selected > ( num_hosts -1 ) && selected <= ( quit - 1 ) )) && move_cursor 1 ;;
+                "[D") (( selected > num_hosts )) && move_cursor -1 ;;
             esac
         ;;
 
-        $'\x20') (( selected <= last_host )) && toggle_selection ;;
-        "") execute_selection ;;
+        $'\x20') (( selected < num_hosts )) && toggle_selection ;;
+        "")
+            execute_selection
+            tput clear
+        ;;
+
         *) ;;
     esac
 }
@@ -160,27 +175,29 @@ move_cursor() {
 
 
 print_menu() {
-    local index host checkbox
+    local index host checkbox option
 
     for index in "${!hosts[@]}"; do
         host="${hosts[$index]}"
 
-        if (( index <= last_host )); then
-            [[ -n "${selected_hosts["$host"]}" ]] && checkbox="[X]" || checkbox="[ ]"
-        fi
+        [[ -n "${selected_hosts["$host"]}" ]] && checkbox="[X]" || checkbox="[ ]"
 
         (( index == selected )) && host="\e[7m${host}\e[27m"
 
-        if (( index <= last_host )); then
-            printf "%s  %b\n" "$checkbox" "$host"
-        else
-            printf "%b    " "$host"
-        fi
-
-        (( index == last_host )) && printf "\n"
+        printf "%s  %b\n" "$checkbox" "$host"
     done
 
-    tput cup $(( quit -1 )) 0
+    printf "\n"
+
+    for index in "${!menu_options[@]}"; do
+        option="${menu_options[$index]}"
+
+        (( ( index + num_hosts ) == selected )) && option="\e[7m${option}\e[27m"
+
+        printf "%b    " "$option"
+    done
+
+    tput ed
 }
 
 
@@ -191,6 +208,7 @@ run_command() {
     history -r "$history_file"
 
     tput cnorm
+    tput cup $(( total_items - 2 )) 0
     read -erp $'\nEnter remote command: ' remote_command
     printf "Run: '%s'\n" "$remote_command"
     read -erp "on selected hosts? [y/N]: " confirm
@@ -203,7 +221,7 @@ run_command() {
 
     for host in "${!selected_hosts[@]}"; do
         printf "\n%s@%s [%s]:$ %s\n" "$user" "$host" "$(date)" "$remote_command"
-        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command" 
+        ssh -qto ConnectTimeout=3 "${user}@${host}" "$remote_command"
     done
 
     read -rsp $'\nPress any key to continue' -n1
@@ -250,8 +268,10 @@ main() {
     trap 'tput cnorm; tput clear' EXIT
     trap '' INT
 
+    tput clear
+
     while true; do
-        tput clear
+        tput cup 0 0
         tput civis
         print_menu
         get_selection
